@@ -58,7 +58,9 @@ def main() -> None:
 
     # After the login above, the cache holds the tokens Spotify gave us.
     refresh_token = cache.get_cached_token()["refresh_token"]
-    set_key(str(ENV_PATH), "SPOTIFY_REFRESH_TOKEN", refresh_token)
+    # quote_mode="never" writes the bare token. By default set_key wraps values in
+    # quotes, and copying that quoted text into a GitHub secret breaks the login.
+    set_key(str(ENV_PATH), "SPOTIFY_REFRESH_TOKEN", refresh_token, quote_mode="never")
 
     print(f"Logged in as: {me['display_name']}")
     print(f"Refresh token saved to {ENV_PATH}")

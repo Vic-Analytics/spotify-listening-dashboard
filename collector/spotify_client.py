@@ -47,7 +47,9 @@ DEFAULT_REDIRECT_URI = "http://127.0.0.1:8888/callback"
 
 def _require_env(name: str) -> str:
     """Return an environment variable, or stop with a helpful message."""
-    value = os.getenv(name, "").strip()
+    # Strip spaces/newlines AND stray quotes: values pasted into GitHub Secrets
+    # often arrive wrapped in quotes or with a trailing newline.
+    value = os.getenv(name, "").strip().strip("'\"").strip()
     if not value:
         raise RuntimeError(
             f"Missing {name}. Open your .env file and fill it in "
