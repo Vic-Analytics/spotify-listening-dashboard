@@ -37,7 +37,27 @@ def get_connection(db_path=None) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row  # lets us read columns by name: row["artist_name"]
     conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+    _add_missing_columns(conn)
     return conn
+
+
+# Columns added after the first version of the table. A brand-new database gets
+# them from schema.sql, but a database created earlier (like the one on the
+# GitHub data branch) needs them added. This is called a "migration".
+_ADDED_COLUMNS = {
+    "reason_start": "TEXT",
+    "reason_end": "TEXT",
+    "shuffle": "INTEGER",
+    "platform": "TEXT",
+}
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(plays)")}
+    for name, sql_type in _ADDED_COLUMNS.items():
+        if name not in existing:
+            conn.execute(f"ALTER TABLE plays ADD COLUMN {name} {sql_type}")
+    conn.commit()
 
 
 def normalize_timestamp(value: str) -> str:
@@ -58,11 +78,13 @@ _INSERT_SQL = """
     INSERT OR IGNORE INTO plays (
         played_at, track_uri, track_id, track_name, artist_name, artist_id,
         all_artists, album_name, duration_ms, ms_played, skipped,
-        context_type, source, collected_at
+        context_type, reason_start, reason_end, shuffle, platform,
+        source, collected_at
     ) VALUES (
         :played_at, :track_uri, :track_id, :track_name, :artist_name, :artist_id,
         :all_artists, :album_name, :duration_ms, :ms_played, :skipped,
-        :context_type, :source, :collected_at
+        :context_type, :reason_start, :reason_end, :shuffle, :platform,
+        :source, :collected_at
     )
 """
 # "INSERT OR IGNORE" = if the UNIQUE rule says this play already exists, skip
@@ -71,6 +93,7 @@ _INSERT_SQL = """
 _OPTIONAL_COLUMNS = (
     "track_id", "track_name", "artist_name", "artist_id", "all_artists",
     "album_name", "duration_ms", "ms_played", "skipped", "context_type",
+    "reason_start", "reason_end", "shuffle", "platform",
 )
 
 

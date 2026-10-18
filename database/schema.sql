@@ -34,6 +34,13 @@ CREATE TABLE IF NOT EXISTS plays (
     -- WHERE the play came from: 'playlist', 'album', 'artist' or NULL (API only)
     context_type  TEXT,
 
+    -- HOW it started/ended and on what (export only; NULL for API-only rows).
+    -- reason_end values include 'trackdone' (finished) and 'fwdbtn' (skipped).
+    reason_start  TEXT,
+    reason_end    TEXT,
+    shuffle       INTEGER,               -- 1 = shuffle was on
+    platform      TEXT,                  -- device family: 'iOS', 'Windows', ...
+
     -- BOOKKEEPING
     source        TEXT NOT NULL CHECK (source IN ('api', 'export')),
     collected_at  TEXT NOT NULL,         -- when WE saved this row (UTC)
