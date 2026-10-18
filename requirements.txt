@@ -1,0 +1,6 @@
+# Talk to Spotify and read secrets from .env
+spotipy
+python-dotenv
+
+# Run the tests
+pytest

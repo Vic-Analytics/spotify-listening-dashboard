@@ -1,0 +1,89 @@
+# collect.yml - runs the Spotify collector every hour on GitHub's computers.
+#
+# Problem: every run starts on a brand-new, empty computer that is thrown away
+# afterwards, so the database would vanish after each run.
+# Solution: keep the database file on a separate branch called "data".
+#   1. download spotify.db from the data branch (if it exists yet)
+#   2. run the collector, which adds any new plays
+#   3. upload the updated spotify.db back to the data branch
+# The "main" branch only ever holds code. Your listening data never touches it.
+
+name: Collect Spotify plays
+
+on:
+  schedule:
+    - cron: "17 * * * *"   # minute 17 of every hour (UTC). Off the top of the
+                           # hour on purpose: :00 is when GitHub is busiest.
+  workflow_dispatch:        # adds a "Run workflow" button so you can test by hand
+
+# Needed so the job may push to the data branch.
+permissions:
+  contents: write
+
+# If a run is still going when the next one starts, queue instead of overlapping.
+# Two runs saving at once could overwrite each other's data.
+concurrency:
+  group: collect-spotify
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download the code
+        uses: actions/checkout@v4
+
+      - name: Restore the database from the data branch
+        run: |
+          mkdir -p data
+          # `|| true`: on the very first run the data branch doesn't exist, which is fine.
+          git fetch origin data || true
+          if git cat-file -e origin/data:spotify.db 2>/dev/null; then
+            git show origin/data:spotify.db > data/spotify.db
+            echo "Restored existing database."
+          else
+            echo "No database yet - starting fresh."
+          fi
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip            # remembers downloaded packages between runs
+
+      - name: Install packages
+        run: pip install -r requirements.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+      - name: Collect recent plays
+        run: python -m collector.run
+        env:
+          # GitHub Secrets become environment variables here. Their values are
+          # hidden in the logs, and the code reads them exactly as it reads .env.
+          SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+          SPOTIFY_CLIENT_SECRET: ${{ secrets.SPOTIFY_CLIENT_SECRET }}
+          SPOTIFY_REFRESH_TOKEN: ${{ secrets.SPOTIFY_REFRESH_TOKEN }}
+          SPOTIFY_REDIRECT_URI: ${{ secrets.SPOTIFY_REDIRECT_URI }}
+
+      - name: Save the database to the data branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Move the database aside, then switch to a brand-new empty branch.
+          cp data/spotify.db "$RUNNER_TEMP/spotify.db"
+          git checkout --orphan data-new
+          git rm -rf --quiet .
+          cp "$RUNNER_TEMP/spotify.db" spotify.db
+
+          # -f because *.db is in .gitignore (that rule protects the main branch).
+          git add -f spotify.db
+          git commit --quiet -m "Update database ($(date -u +%Y-%m-%dT%H:%MZ))"
+
+          # Replace the data branch with this single commit. History is dropped
+          # on purpose: only the latest file matters, and it keeps the repo small.
+          git push --force origin data-new:data

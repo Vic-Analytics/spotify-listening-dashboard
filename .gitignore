@@ -1,0 +1,26 @@
+# --- Secrets: NEVER commit these ---
+.env
+.cache
+.cache-*
+
+# --- Your personal data: keep private ---
+# The SQLite database holds your real listening history
+*.db
+*.sqlite
+*.sqlite3
+# Raw Spotify export files (but keep the folder itself via .gitkeep)
+data/raw/*
+!data/raw/.gitkeep
+
+# --- Python clutter ---
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# --- Editor / OS clutter ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
