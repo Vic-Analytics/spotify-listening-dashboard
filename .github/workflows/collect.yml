@@ -28,6 +28,10 @@ concurrency:
 
 jobs:
   collect:
+    # Only run in the PRIVATE repo that holds the Spotify secrets. If this code is
+    # copied to a public repo (e.g. for the portfolio demo), the job is skipped
+    # instead of failing every hour for lack of secrets.
+    if: github.repository == 'Vic-Analytics/Spotify-Dashboard'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
