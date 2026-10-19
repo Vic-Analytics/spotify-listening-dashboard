@@ -271,6 +271,13 @@ with tab_skips:
             st.caption("Spotify only began filling in its own “skipped” flag in 2022, so this "
                        "dashboard counts Next-button presses instead. Earlier years may still be "
                        "less consistent.")
+        # The filter sits in its own row ABOVE the charts. (When it sat just above the
+        # table, the table's hover toolbar overlapped the right end of the slider.)
+        slider_col, _ = st.columns([1, 2])
+        with slider_col:
+            min_plays = st.slider("Minimum plays for an artist to appear in “Most-skipped artists”",
+                                  10, 500, 100, step=10)
+
         c1, c2 = st.columns(2)
         with c1:
             st.markdown("**Skip rate by month**")
@@ -287,8 +294,7 @@ with tab_skips:
             show(charts.skips_by_context_chart(context))
             st.caption("Combinations with fewer than 200 plays are hidden.")
         with c4:
-            st.markdown("**Most-skipped artists**")
-            min_plays = st.slider("Minimum plays per artist", 10, 500, 100, step=10)
+            st.markdown(f"**Most-skipped artists** (at least {min_plays} plays)")
             skipped_artists = query("skips_by_artist", min_plays=min_plays, **filters)
             st.dataframe(skipped_artists.head(15), hide_index=True, width="stretch")
 
