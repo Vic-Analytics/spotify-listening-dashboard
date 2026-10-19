@@ -1,0 +1,7 @@
+# Packages the dashboard needs. The Streamlit demo site installs from THIS file
+# (it looks next to the app file first), so it lists everything the app imports.
+streamlit
+plotly
+pandas
+tzdata
+python-dotenv

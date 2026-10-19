@@ -85,7 +85,9 @@ def connect(db_path=None, tz_name: str | None = None) -> sqlite3.Connection:
     if not path.exists():
         raise FileNotFoundError(f"Database not found: {path}")
     # mode=ro: this connection physically cannot change your data.
-    conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
+    # check_same_thread=False: the Streamlit dashboard shares one connection
+    # between its worker threads (reads only, so this is safe).
+    conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, check_same_thread=False)
     # Temp tables still work on a read-only connection: they live in memory/temp.
     return prepare(conn, tz_name)
 

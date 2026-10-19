@@ -8,6 +8,8 @@
 *.db
 *.sqlite
 *.sqlite3
+# ...except the FAKE demo database, which is meant to be public
+!data/sample/sample.db
 # Raw Spotify export files (but keep the folder itself via .gitkeep)
 data/raw/*
 !data/raw/.gitkeep
@@ -24,3 +26,6 @@ __pycache__/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local tooling
+.claude/

@@ -1,0 +1,11 @@
+# Streamlit settings. These make the app look the same on every machine.
+[theme]
+base = "light"
+primaryColor = "#2a78d6"
+backgroundColor = "#f9f9f7"
+secondaryBackgroundColor = "#f0efec"
+textColor = "#0b0b0b"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false

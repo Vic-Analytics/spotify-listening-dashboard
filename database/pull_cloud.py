@@ -87,6 +87,18 @@ def merge_from_file(conn, cloud_db_path: Path) -> dict:
     return {"in cloud": in_cloud, "added": added, "already local": in_cloud - added}
 
 
+def sync_from_cloud(conn) -> dict:
+    """Download the cloud database and merge it into `conn`. Used by this script
+    and by the dashboard's "Sync new plays" button, so both behave identically."""
+    with tempfile.TemporaryDirectory() as folder:
+        cloud_path = Path(folder) / "cloud_spotify.db"
+        download_cloud_db(cloud_path)
+        size = cloud_path.stat().st_size
+        result = merge_from_file(conn, cloud_path)
+    result["cloud size warning"] = size > CLOUD_SIZE_WARNING_BYTES
+    return result
+
+
 def main() -> None:
     conn = get_connection()
     before = count_plays(conn)
@@ -96,15 +108,11 @@ def main() -> None:
         cloud_path = Path(sys.argv[sys.argv.index("--file") + 1])
         result = merge_from_file(conn, cloud_path)
     else:
-        with tempfile.TemporaryDirectory() as folder:
-            cloud_path = Path(folder) / "cloud_spotify.db"
-            print("Downloading the database from the GitHub data branch ...")
-            download_cloud_db(cloud_path)
-            size = cloud_path.stat().st_size
-            if size > CLOUD_SIZE_WARNING_BYTES:
-                print(f"WARNING: the cloud database is {size / 1e6:.0f} MB. It should be tiny "
-                      "(API plays only). Was your full local database pushed to the data branch?")
-            result = merge_from_file(conn, cloud_path)
+        print("Downloading the database from the GitHub data branch ...")
+        result = sync_from_cloud(conn)
+        if result.pop("cloud size warning"):
+            print("WARNING: the cloud database is over 30 MB. It should be tiny "
+                  "(API plays only). Was your full local database pushed to the data branch?")
 
     after = count_plays(conn)
     latest_after = conn.execute("SELECT MAX(played_at) FROM plays").fetchone()[0]
