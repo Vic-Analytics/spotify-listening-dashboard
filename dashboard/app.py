@@ -82,6 +82,10 @@ def fmt_time(minutes: float) -> str:
     return f"{minutes / 60:,.0f} hours" if minutes >= 600 else f"{minutes:,.0f} min"
 
 
+def fmt_days(count: int) -> str:
+    return f"{count} day" if count == 1 else f"{count} days"
+
+
 def table_view(df: pd.DataFrame, label: str = "Table view") -> None:
     """Every chart has a table twin, for exact values and screen-reader users."""
     with st.expander(label):
@@ -230,8 +234,8 @@ with tab_habits:
     streaks = query("streaks", **filters)
     summary_streak = streak_summary(streaks)
     s1, s2 = st.columns(2)
-    s1.metric("Longest streak", f"{summary_streak['longest_days']} days")
-    s2.metric("Streak ending at latest listening day", f"{summary_streak['current_days']} days")
+    s1.metric("Longest streak", fmt_days(summary_streak["longest_days"]))
+    s2.metric("Streak ending at latest listening day", fmt_days(summary_streak["current_days"]))
     st.caption("A streak is consecutive days with at least one 30+ second play.")
     show(charts.streaks_chart(streaks))
     table_view(streaks.head(25), "Table view (longest streaks)")
