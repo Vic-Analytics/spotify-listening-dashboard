@@ -2,5 +2,9 @@
 spotipy
 python-dotenv
 
+# Analysis (pandas reshapes SQL results; tzdata supplies time zone rules on Windows)
+pandas
+tzdata
+
 # Run the tests
 pytest
