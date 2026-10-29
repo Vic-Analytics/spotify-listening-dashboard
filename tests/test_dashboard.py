@@ -76,7 +76,7 @@ def test_every_tab_renders_with_each_toggle(monkeypatch):
 
 def test_the_new_tabs_exist_and_the_artist_and_year_pickers_work(monkeypatch):
     at = run_app(monkeypatch)
-    assert [t.label for t in at.tabs] == ["Top lists", "Artist deep-dive", "Trends", "Habits & streaks",
+    assert [t.label for t in at.tabs] == ["Top lists", "Artist deep dive", "Trends", "Habits & streaks",
                                          "Sessions", "Discovery", "Skips"]
     artist_picker = next(s for s in at.selectbox if s.label == "Artist")
     year_picker = next(s for s in at.selectbox if s.label == "Year")
@@ -143,6 +143,16 @@ def test_charts_show_a_friendly_message_instead_of_crashing_on_empty_data(sample
     empty = run_query(sample_conn, "top_artists", start="1900-01-01", end="1900-01-02")
     fig = charts.top_artists_chart(empty)
     assert fig.layout.annotations[0].text == "No data for this selection"
+
+
+def test_ranked_bars_keep_one_row_per_item_even_when_two_names_match():
+    # Two different tracks that share a title, and two long titles that look the same once shortened.
+    names = ["Intro", "Intro", "A" * 40 + " one", "A" * 40 + " two"]
+    fig = charts.ranked_bars(names, [90, 50, 30, 10], names, "plays")
+    bar = fig.data[0]
+    assert len(set(bar.y)) == 4                                   # four separate rows, none merged
+    assert list(bar.x) == [90, 50, 30, 10]                        # lengths follow the values, in order
+    assert list(fig.layout.yaxis.ticktext)[:2] == ["Intro", "Intro"]
 
 
 def test_no_chart_uses_a_second_y_axis(sample_conn):

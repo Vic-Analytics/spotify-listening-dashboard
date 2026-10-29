@@ -79,14 +79,19 @@ def ranked_bars(labels, values, hover_names, value_label, color=BLUE, height=Non
     if len(values) == 0:
         return _empty()
     labels = [_shorten(str(label)) for label in labels]
+    # Plot against row NUMBERS and print the names as tick labels. If the names were the
+    # axis itself, two rows with the same label (two tracks with one title, or titles that
+    # look identical once shortened) would share a single row and draw their bars on top of each other.
+    rows = list(range(len(values)))
     fig = go.Figure(go.Bar(
-        x=list(values), y=labels, orientation="h", marker_color=color,
+        x=list(values), y=rows, orientation="h", marker_color=color,
         customdata=list(hover_names),
         text=[f"{v:,.0f}" for v in values], textposition="outside", cliponaxis=False,
         textfont=dict(color=INK_SECONDARY),
         hovertemplate="<b>%{customdata}</b><br>%{x:,.0f} " + value_label + "<extra></extra>",
     ))
-    fig.update_yaxes(autorange="reversed", showgrid=False)
+    fig.update_yaxes(autorange="reversed", showgrid=False,
+                     tickmode="array", tickvals=rows, ticktext=labels)
     # Headroom past the longest bar so its printed value is never clipped.
     fig.update_xaxes(title=value_label.capitalize(), title_font=dict(color=INK_MUTED, size=12),
                      range=[0, max(values) * 1.2])

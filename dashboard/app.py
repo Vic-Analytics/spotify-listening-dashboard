@@ -199,7 +199,7 @@ st.caption(f"Listened on {summary['active_days']:,.0f} different days.")
 
 (tab_top, tab_artist, tab_trends, tab_habits,
  tab_sessions, tab_discovery, tab_skips) = st.tabs(
-    ["Top lists", "Artist deep-dive", "Trends", "Habits & streaks", "Sessions", "Discovery", "Skips"])
+    ["Top lists", "Artist deep dive", "Trends", "Habits & streaks", "Sessions", "Discovery", "Skips"])
 
 # ---- Top lists --------------------------------------------------------------
 with tab_top:
@@ -217,9 +217,9 @@ with tab_top:
         show(charts.top_tracks_chart(tracks))
         table_view(tracks)
 
-# ---- Artist deep-dive ---------------------------------------------------------
+# ---- Artist deep dive ---------------------------------------------------------
 with tab_artist:
-    st.subheader("Artist deep-dive")
+    st.subheader("Artist deep dive")
     st.caption("Everything about one artist across your whole history. The date range in the "
                "sidebar does not apply on this tab.")
     artist_list = query("artist_list")

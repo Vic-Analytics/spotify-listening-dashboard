@@ -11,7 +11,7 @@ An end-to-end data project: an automated pipeline that collects my Spotify liste
 - **Collects** my recently played tracks every hour with a scheduled GitHub Actions job and stores them in SQLite, with no duplicates.
 - **Imports** my Spotify *Extended Streaming History* export (about 288,000 plays over 9 years), cleans it, and merges it into the same database. Plays that overlap with the API data are enriched, not duplicated.
 - **Analyzes** the data with 19 hand-written SQL queries (window functions, CTEs, gaps-and-islands streaks and sessions) plus pandas for reshaping.
-- **Visualizes** it in a Streamlit dashboard with seven tabs: top lists, an artist deep-dive page, weekly/monthly trends, habits (a weekday-by-hour heatmap, a calendar heatmap of every day in a year, and streaks), listening sessions with a skip-fatigue analysis, new-artist discovery, and skip behavior. Most views can be filtered by date range.
+- **Visualizes** it in a Streamlit dashboard with seven tabs: top lists, an artist deep dive page, weekly/monthly trends, habits (a weekday-by-hour heatmap, a calendar heatmap of every day in a year, and streaks), listening sessions with a skip-fatigue analysis, new-artist discovery, and skip behavior. Most views can be filtered by date range.
 
 ## Architecture
 
@@ -72,7 +72,7 @@ My own data, Nov 2017 to Oct 2026:
 |---|---|
 | ![Trends](docs/screenshots/02-trends.png) **Trends:** weekly and monthly minutes | ![Habits and streaks](docs/screenshots/03-habits-streaks.png) **Habits & streaks:** weekday × hour heatmap |
 | ![Discovery](docs/screenshots/04-discovery.png) **Discovery:** new artists over time | ![Skips](docs/screenshots/05-skips.png) **Skips:** how, when and where I skip |
-| ![Sessions](docs/screenshots/06-sessions.png) **Sessions:** session length and skip fatigue | ![Artist deep-dive](docs/screenshots/07-artist-deep-dive.png) **Artist deep-dive:** one artist's whole history |
+| ![Sessions](docs/screenshots/06-sessions.png) **Sessions:** session length and skip fatigue | ![Artist deep dive](docs/screenshots/07-artist-deep-dive.png) **Artist deep dive:** one artist's whole history |
 
 ## Privacy
 
