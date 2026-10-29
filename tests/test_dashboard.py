@@ -13,8 +13,8 @@ pytest.importorskip("plotly")
 
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
-from analysis.metrics import (add_cumulative_artists, calendar_grid, heatmap_matrix,  # noqa: E402
-                              session_length_buckets)
+from analysis.metrics import (add_cumulative_artists, calendar_grid, device_share_by_month,  # noqa: E402
+                              heatmap_matrix, session_length_buckets)
 from analysis.queries import connect, run_query  # noqa: E402
 from dashboard import charts  # noqa: E402
 from database.db import PROJECT_ROOT  # noqa: E402
@@ -115,6 +115,8 @@ def test_all_charts_build_from_real_query_results(sample_conn):
                 charts.cumulative_artists_chart(discovery)]
 
     sessions = run_query(sample_conn, "sessions")
+    figures += [charts.device_share_chart(device_share_by_month(run_query(sample_conn, "device_by_month"))),
+                charts.shuffle_chart(run_query(sample_conn, "shuffle_by_month"))]
     top_artist = run_query(sample_conn, "artist_list").iloc[0]["artist_name"]
     daily = run_query(sample_conn, "daily", start="2025-01-01", end="2025-12-31")
     figures += [

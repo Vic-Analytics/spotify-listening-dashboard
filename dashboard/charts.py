@@ -16,6 +16,7 @@ Design rules used throughout (so the charts read as one system):
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # ---- colours -----------------------------------------------------------
 BLUE = "#2a78d6"
@@ -353,3 +354,36 @@ def calendar_chart(grid: dict) -> go.Figure:
     fig.update_xaxes(showgrid=False, linecolor="rgba(0,0,0,0)", tickmode="array",
                      tickvals=[week for week, _ in ticks], ticktext=[name for _, name in ticks])
     return fig
+
+
+# ---- devices and shuffle over time -------------------------------------------------------------
+
+def device_share_chart(share: pd.DataFrame, per_row: int = 3) -> go.Figure:
+    """Small multiples: one panel per device showing its share of each month's listening
+    time. Every panel has the same 0-100% axis, so the panels compare fairly. They all use
+    one colour because the metric is the same; the panel title names the device."""
+    if share.empty:
+        return _empty()
+    devices = list(share.columns)
+    rows = -(-len(devices) // per_row)                      # ceiling division
+    fig = make_subplots(rows=rows, cols=per_row, subplot_titles=devices,
+                        shared_xaxes=True, shared_yaxes=True,
+                        horizontal_spacing=0.05, vertical_spacing=0.22 if rows > 1 else 0.1)
+    for i, device in enumerate(devices):
+        fig.add_trace(go.Scatter(
+            x=share.index, y=share[device], mode="lines", line=dict(color=BLUE, width=2),
+            fill="tozeroy", fillcolor=_with_alpha(BLUE, 0.08),
+            hovertemplate="%{x|%b %Y}<br>%{y:.0f}% of listening on " + device + "<extra></extra>",
+        ), row=i // per_row + 1, col=i % per_row + 1)
+    _style(fig, height=250 * rows + 40)
+    fig.update_layout(margin=dict(l=8, r=16, t=40, b=8))
+    fig.update_yaxes(range=[0, 100], tickvals=[0, 50, 100], ticksuffix="%", showgrid=True)
+    fig.update_xaxes(tickformat="%b %y", nticks=3, showgrid=False)
+    fig.update_annotations(font=dict(size=13, color=INK_SECONDARY))   # the panel titles
+    return fig
+
+
+def shuffle_chart(df: pd.DataFrame) -> go.Figure:
+    plot_df = df.assign(month_start=pd.to_datetime(df["month_start"]))
+    return line_chart(plot_df, "month_start", "shuffle_pct", BLUE, "% of plays with shuffle on",
+                      "% shuffle", "%b %Y", y_range=[0, 100], fill=False)

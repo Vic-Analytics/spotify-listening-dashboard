@@ -16,6 +16,7 @@ The fake listener is designed to show off every chart:
   * skip rate that creeps upward over time        -> skip charts
   * skipping that grows as a session goes on      -> skip-fatigue chart (an invented pattern)
   * 1-3 sessions a day, separated by long pauses  -> sessions tab
+  * a shift from PC to phone, and more shuffle    -> devices and shuffle charts (invented trends)
 Times are generated as UTC and the dashboard shows the sample in UTC.
 """
 
@@ -102,8 +103,12 @@ def generate_plays(rng, artists) -> list[dict]:
             hour = rng.choices(list(profile), list(profile.values()))[0]
             clock = datetime(today.year, today.month, today.day, hour,
                              rng.randint(0, 59), tzinfo=timezone.utc)
-            shuffle = rng.random() < 0.6
-            platform = rng.choices(["iOS", "Windows", "Android"], [0.65, 0.25, 0.10])[0]
+            # Habits drift over the period: listening moves from the PC to the phone, and shuffle
+            # use grows. These invented trends give the device and shuffle charts something to show.
+            progress = day_number / total_days
+            shuffle = rng.random() < 0.35 + 0.40 * progress
+            platform = rng.choices(["iOS", "Windows", "Android"],
+                                   [0.45 + 0.25 * progress, 0.45 - 0.35 * progress, 0.10 + 0.10 * progress])[0]
             skip_prob = min(0.9, skip_base * (1.35 if shuffle else 0.5))
 
             reason_start = "clickrow"

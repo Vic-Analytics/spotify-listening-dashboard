@@ -62,6 +62,37 @@ def add_cumulative_artists(discovery_df: pd.DataFrame) -> pd.DataFrame:
     return discovery_df.assign(total_artists_discovered=discovery_df["new_artists"].cumsum())
 
 
+# ---- devices ------------------------------------------------------------------
+
+def device_share_by_month(device_df: pd.DataFrame, top: int = 5, min_plays: int = 20) -> pd.DataFrame:
+    """
+    Turn device_by_month.sql rows into a table of each device's share (%) of the
+    month's listening time: one row per month, one column per device.
+
+    * The `top` biggest devices (over the whole range) get a column; the rest are
+      added together as "Other", so there are never more than top + 1 panels.
+    * Every month in the range appears. A month with no listening, or fewer than
+      `min_plays` plays, is left empty (NaN) instead of showing a share of almost nothing.
+    """
+    if device_df.empty:
+        return pd.DataFrame()
+    data = device_df.assign(month_start=pd.to_datetime(device_df["month_start"]))
+    order = data.groupby("platform")["minutes"].sum().sort_values(ascending=False).index.tolist()
+    keep = order[:top]
+    data = data.assign(platform=data["platform"].where(data["platform"].isin(keep), "Other"))
+    columns = keep + (["Other"] if len(order) > top else [])
+
+    minutes = data.pivot_table(index="month_start", columns="platform", values="minutes", aggfunc="sum")
+    plays = data.groupby("month_start")["plays"].sum()
+    months = pd.date_range(minutes.index.min(), minutes.index.max(), freq="MS")
+    minutes = minutes.reindex(index=months, columns=columns).fillna(0)
+    plays = plays.reindex(months).fillna(0)
+
+    totals = minutes.sum(axis=1)
+    share = minutes.div(totals.where((totals > 0) & (plays >= min_plays)), axis=0) * 100
+    return share.round(1).rename_axis("month_start")
+
+
 # ---- sessions ---------------------------------------------------------------
 
 # (label, lower bound in minutes). A session lands in the last bucket whose bound it reaches.

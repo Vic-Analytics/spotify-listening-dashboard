@@ -314,6 +314,60 @@ def test_artist_monthly_has_one_row_per_active_month():
     assert list(monthly["minutes"]) == [8.0, 2.0]
 
 
+# ---------- devices and shuffle over time ----------
+
+def device_plays(month, platform, count, shuffle=0):
+    """`count` full listens on one platform, spread over the first days of `month` (e.g. '2026-01')."""
+    return [play(f"{month}-{1 + i % 20:02d}T{10 + i // 20:02d}:00:00Z", f"{platform}{month}{i}",
+                 platform=platform, shuffle=shuffle) for i in range(count)]
+
+
+def test_device_by_month_counts_minutes_per_device_and_skips_unknown_platforms():
+    conn = analysed(device_plays("2026-01", "iOS", 3) + device_plays("2026-01", "Windows", 1)
+                    + [play("2026-01-25T18:00:00Z", "NoPlatform", platform=None)])
+    rows = run_query(conn, "device_by_month").set_index("platform")
+    assert rows.loc["iOS", "minutes"] == 12.0 and rows.loc["Windows", "minutes"] == 4.0
+    assert "NoPlatform" not in rows.index and len(rows) == 2
+
+
+def test_device_share_by_month_gives_each_devices_share_of_the_month():
+    from analysis.metrics import device_share_by_month
+    plays = (device_plays("2026-01", "iOS", 15) + device_plays("2026-01", "Windows", 5)
+             + device_plays("2026-03", "iOS", 20))                    # nothing at all in February
+    share = device_share_by_month(run_query(analysed(plays), "device_by_month"))
+    assert list(share.columns) == ["iOS", "Windows"]                  # biggest device first
+    assert list(share.index.strftime("%Y-%m")) == ["2026-01", "2026-02", "2026-03"]
+    assert list(share.loc["2026-01-01"]) == [75.0, 25.0]
+    assert share.loc["2026-02-01"].isna().all()                       # a quiet month is blank, not 0%
+    assert list(share.loc["2026-03-01"].fillna(0)) == [100.0, 0.0]
+
+
+def test_device_share_groups_small_devices_as_other_and_blanks_tiny_months():
+    from analysis.metrics import device_share_by_month
+    devices = ["A", "B", "C", "D", "E", "F", "G"]
+    plays = [p for i, d in enumerate(devices) for p in device_plays("2026-01", d, 7 - i)]   # 7, 6, 5, ... plays
+    share = device_share_by_month(run_query(analysed(plays), "device_by_month"), top=5)
+    assert list(share.columns) == ["A", "B", "C", "D", "E", "Other"]
+    assert share.loc["2026-01-01"].sum() == pytest.approx(100.0, abs=0.2)
+    tiny = device_share_by_month(run_query(analysed(device_plays("2026-01", "iOS", 3)), "device_by_month"))
+    assert tiny.isna().all().all()                                    # 3 plays < 20: too few to trust
+
+
+def test_device_share_of_nothing_is_an_empty_table():
+    from analysis.metrics import device_share_by_month
+    assert device_share_by_month(run_query(analysed([play("2026-01-05T18:00:00Z", platform=None)]),
+                                           "device_by_month")).empty
+
+
+def test_shuffle_by_month_ignores_unknown_values_and_tiny_months():
+    conn = analysed(device_plays("2026-01", "iOS", 15, shuffle=1) + device_plays("2026-01", "Windows", 5, shuffle=0)
+                    + device_plays("2026-02", "iOS", 4, shuffle=1)                  # too few plays: hidden
+                    + [play("2026-01-28T18:00:00Z", "Unknown", shuffle=None)])      # unknown: not counted as off
+    rows = run_query(conn, "shuffle_by_month")
+    assert list(rows["month_start"]) == ["2026-01-01"]
+    assert (rows.iloc[0]["plays"], rows.iloc[0]["shuffle_plays"], rows.iloc[0]["shuffle_pct"]) == (20, 15, 75.0)
+
+
 # ---------- calendar heatmap ----------
 
 def test_daily_query_and_calendar_grid_lay_a_year_out_by_week():

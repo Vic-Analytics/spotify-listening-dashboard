@@ -23,8 +23,8 @@ import streamlit as st
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from analysis.metrics import (add_cumulative_artists, calendar_grid, fill_missing_periods,  # noqa: E402
-                              heatmap_matrix, session_length_buckets, session_summary,
+from analysis.metrics import (add_cumulative_artists, calendar_grid, device_share_by_month,  # noqa: E402
+                              fill_missing_periods, heatmap_matrix, session_length_buckets, session_summary,
                               streak_summary)
 from analysis.queries import connect, get_timezone_name, run_query  # noqa: E402
 from dashboard import charts  # noqa: E402
@@ -280,6 +280,28 @@ with tab_trends:
     show(charts.trend_chart(trend, period))
     st.caption("Weeks start on Monday. A dip to zero means no listening that period.")
     table_view(trend)
+
+    st.subheader("Devices and shuffle over time")
+    device_rows = query("device_by_month", **filters)
+    if device_rows.empty:
+        st.info("Device and shuffle details come from the Extended Streaming History export. "
+                "There are none in this date range.")
+    else:
+        st.markdown("**Share of listening time by device**")
+        device_share = device_share_by_month(device_rows)
+        show(charts.device_share_chart(device_share))
+        st.caption("One panel per device: the share of each month's listening time spent on it. "
+                   "Every panel uses the same 0-100% scale. Devices beyond the five biggest are grouped as "
+                   "\"Other\". Months with fewer than 20 plays are left blank.")
+        table_view(device_share.reset_index().assign(month_start=lambda d: d["month_start"].dt.strftime("%Y-%m")),
+                   "Table view (share of listening time by device, %)")
+
+        st.markdown("**Share of plays with shuffle on**")
+        shuffle_rows = query("shuffle_by_month", **filters)
+        show(charts.shuffle_chart(shuffle_rows))
+        st.caption("Counts plays of 30+ seconds. Only plays from the export say whether shuffle was on, "
+                   "so API-only plays are left out. Months with fewer than 20 such plays are hidden.")
+        table_view(shuffle_rows, "Table view (shuffle share by month)")
 
 # ---- Habits & streaks ------------------------------------------------------------
 with tab_habits:
