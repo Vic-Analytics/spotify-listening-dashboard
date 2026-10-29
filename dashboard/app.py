@@ -23,8 +23,9 @@ import streamlit as st
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from analysis.metrics import (add_cumulative_artists, fill_missing_periods,  # noqa: E402
-                              heatmap_matrix, streak_summary)
+from analysis.metrics import (add_cumulative_artists, calendar_grid, fill_missing_periods,  # noqa: E402
+                              heatmap_matrix, session_length_buckets, session_summary,
+                              streak_summary)
 from analysis.queries import connect, get_timezone_name, run_query  # noqa: E402
 from dashboard import charts  # noqa: E402
 from database.db import get_connection, get_db_path  # noqa: E402
@@ -84,6 +85,14 @@ def fmt_time(minutes: float) -> str:
 
 def fmt_days(count: int) -> str:
     return f"{count} day" if count == 1 else f"{count} days"
+
+
+def fmt_duration(minutes: float) -> str:
+    return f"{minutes / 60:,.1f} hours" if minutes >= 120 else f"{minutes:,.0f} min"
+
+
+def fmt_month(iso_date: str) -> str:
+    return pd.Timestamp(iso_date).strftime("%b %Y")
 
 
 def table_view(df: pd.DataFrame, label: str = "Table view") -> None:
@@ -188,8 +197,9 @@ k5.metric("Top artist", summary["top_artist"], f"{fmt_time(summary['top_artist_m
           delta_color="off", delta_arrow="off")
 st.caption(f"Listened on {summary['active_days']:,.0f} different days.")
 
-tab_top, tab_trends, tab_habits, tab_discovery, tab_skips = st.tabs(
-    ["Top lists", "Trends", "Habits & streaks", "Discovery", "Skips"])
+(tab_top, tab_artist, tab_trends, tab_habits,
+ tab_sessions, tab_discovery, tab_skips) = st.tabs(
+    ["Top lists", "Artist deep-dive", "Trends", "Habits & streaks", "Sessions", "Discovery", "Skips"])
 
 # ---- Top lists --------------------------------------------------------------
 with tab_top:
@@ -206,6 +216,58 @@ with tab_top:
         tracks = query("top_tracks", limit=top_n, **filters)
         show(charts.top_tracks_chart(tracks))
         table_view(tracks)
+
+# ---- Artist deep-dive ---------------------------------------------------------
+with tab_artist:
+    st.subheader("Artist deep-dive")
+    st.caption("Everything about one artist across your whole history. The date range in the "
+               "sidebar does not apply on this tab.")
+    artist_list = query("artist_list")
+    if artist_list.empty:
+        st.info("No artists to show yet.")
+    else:
+        chosen = st.selectbox("Artist", artist_list["artist_name"].tolist(),
+                              help="Sorted by time listened. Click and type to search.")
+        profile = query("artist_profile", artist=chosen).iloc[0]
+        first_month, last_month = fmt_month(profile["first_heard"]), fmt_month(profile["last_heard"])
+
+        a1, a2, a3, a4, a5 = st.columns(5)
+        a1.metric("Time listened", fmt_time(profile["minutes"]),
+                  f"{profile['share_pct']:.1f}% of all listening", delta_color="off", delta_arrow="off")
+        a2.metric("Rank", f"#{profile['minutes_rank']:,.0f}",
+                  f"of {len(artist_list):,} artists", delta_color="off", delta_arrow="off")
+        a3.metric("Plays", f"{profile['plays']:,.0f}",
+                  f"{profile['tracks']:,.0f} different tracks", delta_color="off", delta_arrow="off")
+        a4.metric("Days listened", f"{profile['active_days']:,.0f}",
+                  f"since {first_month}", delta_color="off", delta_arrow="off")
+        if pd.isna(profile["skip_rate_pct"]):
+            a5.metric("Skip rate", "n/a", "no export data", delta_color="off", delta_arrow="off")
+        else:
+            a5.metric("Skip rate", f"{profile['skip_rate_pct']:.0f}%",
+                      f"vs {profile['period_skip_pct']:.0f}% overall then",
+                      delta_color="off", delta_arrow="off")
+        st.caption(f"First heard {fmt_month(profile['first_heard'])}, last heard {last_month}. "
+                   "Skip rate is compared with your skip rate on all listening between this artist's "
+                   "first and last play (\"overall then\"). Compare the two numbers: your skipping "
+                   "changed a lot over the years.")
+
+        st.markdown("**Minutes per month**")
+        monthly = fill_missing_periods(query("artist_monthly", artist=chosen), "month_start", "MS")
+        show(charts.trend_chart(monthly, "Monthly"))
+        table_view(monthly)
+
+        st.markdown(f"**Most-played tracks** (top {top_n})")
+        artist_tracks = query("artist_tracks", artist=chosen, limit=top_n)
+        t_left, t_right = st.columns(2)
+        with t_left:
+            show(charts.artist_tracks_chart(artist_tracks))
+        with t_right:
+            st.dataframe(
+                artist_tracks[["track_name", "plays", "starts", "minutes", "skip_rate_pct"]].rename(
+                    columns={"track_name": "Track", "plays": "Plays", "starts": "Starts",
+                             "minutes": "Minutes", "skip_rate_pct": "Skip rate %"}),
+                hide_index=True, width="stretch")
+            st.caption("Starts counts every time the track began, including quick skips.")
 
 # ---- Trends -------------------------------------------------------------------
 with tab_trends:
@@ -230,6 +292,19 @@ with tab_habits:
     grid_table.columns = [f"{hour}:00" for hour in grid_table.columns]   # text column names
     table_view(grid_table.reset_index(names="weekday"), "Table view (minutes or plays per weekday and hour)")
 
+    st.subheader("Every day of a year")
+    years = list(range(last_day.year, first_day.year - 1, -1))      # newest first
+    cal_year = st.selectbox("Year", years)
+    daily = query("daily", start=f"{cal_year}-01-01", end=f"{cal_year}-12-31")
+    calendar = calendar_grid(daily, cal_year, within=(first_day, last_day))
+    show(charts.calendar_chart(calendar))
+    st.caption(f"Listened on {calendar['active_days']:,} of {calendar['days_covered']:,} days in {cal_year}. "
+               "Each square is a day (weeks run left to right, Monday at the top); grey means no listening "
+               "and blank squares fall outside your data. The colour scale tops out at a typical big day "
+               "(the 95th percentile), so a few marathon days do not wash out the rest. "
+               "The sidebar date range does not apply here.")
+    table_view(daily, "Table view (minutes and plays per day)")
+
     st.subheader("Listening streaks")
     streaks = query("streaks", **filters)
     summary_streak = streak_summary(streaks)
@@ -239,6 +314,49 @@ with tab_habits:
     st.caption("A streak is consecutive days with at least one 30+ second play.")
     show(charts.streaks_chart(streaks))
     table_view(streaks.head(25), "Table view (longest streaks)")
+
+# ---- Sessions ----------------------------------------------------------------------------
+with tab_sessions:
+    st.subheader("Listening sessions")
+    st.caption("A session is a stretch of listening with no pause longer than 30 minutes. Skipped "
+               "tracks count as part of the session. A session belongs to the day it started.")
+    sessions = query("sessions", **filters)
+    if sessions.empty:
+        st.info("No sessions in this date range.")
+    else:
+        stats = session_summary(sessions)
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Sessions", f"{stats['sessions']:,}")
+        s2.metric("Typical session", fmt_duration(stats["median_minutes"]),
+                  "median length", delta_color="off", delta_arrow="off")
+        s3.metric("Typical track count", f"{stats['median_tracks']:,.0f}",
+                  "tracks per session, median", delta_color="off", delta_arrow="off")
+        s4.metric("Longest session", fmt_duration(stats["longest_minutes"]),
+                  f"started {stats['longest_started'][:10]}", delta_color="off", delta_arrow="off")
+
+        c_len, c_fat = st.columns(2)
+        with c_len:
+            st.markdown("**How long sessions last**")
+            buckets = session_length_buckets(sessions)
+            show(charts.session_length_chart(buckets))
+        with c_fat:
+            st.markdown("**Do you skip more as a session goes on?**")
+            fatigue = query("skip_fatigue", **filters)
+            show(charts.skip_fatigue_chart(fatigue))
+        st.caption("Skip fatigue: the share of plays ended with Next, by track number within the session. Only "
+                   "export plays are used. Track 1 is usually one you picked yourself, so it is "
+                   "rarely skipped. The grey bars use only sessions of 20+ tracks, so the same sessions "
+                   "appear in each of the first five groups, so a changing mix of sessions cannot explain "
+                   "a rise there. This shows a pattern, not a cause: long shuffle sessions may simply be "
+                   "where you skip more. Groups with fewer than 100 plays are hidden.")
+        table_view(fatigue, "Table view (skip rate by position in session)")
+        table_view(buckets, "Table view (session lengths)")
+
+        st.markdown("**Longest sessions**")
+        longest = sessions.nlargest(10, "minutes")[["started_at", "minutes", "tracks", "plays", "skips"]]
+        st.dataframe(longest.rename(columns={"started_at": "Started", "minutes": "Minutes", "tracks": "Tracks",
+                                             "plays": "Plays (30s+)", "skips": "Skipped"}),
+                     hide_index=True, width="stretch")
 
 # ---- Discovery ----------------------------------------------------------------------
 with tab_discovery:

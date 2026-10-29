@@ -11,7 +11,7 @@ import sys
 
 import pandas as pd
 
-from analysis.metrics import heatmap_matrix, streak_summary
+from analysis.metrics import heatmap_matrix, session_length_buckets, session_summary, streak_summary
 from analysis.queries import connect, get_timezone_name, run_query
 
 
@@ -66,6 +66,14 @@ def main() -> None:
 
     section("SKIPS BY DEVICE & SHUFFLE")
     print(run_query(conn, "skips_by_context", **args).to_string(index=False))
+
+    section("LISTENING SESSIONS (gap of 30+ minutes starts a new one)")
+    sessions = run_query(conn, "sessions", **args)
+    print(session_summary(sessions))
+    print(session_length_buckets(sessions).to_string(index=False))
+
+    section("SKIP FATIGUE (skip rate by track number within a session)")
+    print(run_query(conn, "skip_fatigue", **args).to_string(index=False))
 
     section("MOST-SKIPPED ARTISTS (100+ plays)")
     print(run_query(conn, "skips_by_artist", **args).head(8).to_string(index=False))

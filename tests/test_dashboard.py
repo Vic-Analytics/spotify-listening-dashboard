@@ -13,7 +13,8 @@ pytest.importorskip("plotly")
 
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
-from analysis.metrics import add_cumulative_artists, heatmap_matrix  # noqa: E402
+from analysis.metrics import (add_cumulative_artists, calendar_grid, heatmap_matrix,  # noqa: E402
+                              session_length_buckets)
 from analysis.queries import connect, run_query  # noqa: E402
 from dashboard import charts  # noqa: E402
 from database.db import PROJECT_ROOT  # noqa: E402
@@ -73,6 +74,32 @@ def test_every_tab_renders_with_each_toggle(monkeypatch):
     assert not at.exception, [e.value for e in at.exception]
 
 
+def test_the_new_tabs_exist_and_the_artist_and_year_pickers_work(monkeypatch):
+    at = run_app(monkeypatch)
+    assert [t.label for t in at.tabs] == ["Top lists", "Artist deep-dive", "Trends", "Habits & streaks",
+                                         "Sessions", "Discovery", "Skips"]
+    artist_picker = next(s for s in at.selectbox if s.label == "Artist")
+    year_picker = next(s for s in at.selectbox if s.label == "Year")
+    assert year_picker.options == ["2026", "2025"]               # newest first, from the sample's date range
+
+    # Pick the least-listened artist and the oldest year; the page must still render.
+    artist_picker.select(artist_picker.options[-1])
+    year_picker.select("2025")
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert any(m.label == "Longest session" for m in at.metric)
+    assert any(m.label == "Skip rate" for m in at.metric)
+
+
+def test_sessions_tab_responds_to_the_date_range(monkeypatch):
+    at = run_app(monkeypatch)
+    all_time = int(next(m for m in at.metric if m.label == "Sessions").value.replace(",", ""))
+    at.sidebar.selectbox[0].select("Last 30 days").run()
+    assert not at.exception, [e.value for e in at.exception]
+    recent = int(next(m for m in at.metric if m.label == "Sessions").value.replace(",", ""))
+    assert 0 < recent < all_time
+
+
 def test_all_charts_build_from_real_query_results(sample_conn):
     figures = [
         charts.top_artists_chart(run_query(sample_conn, "top_artists", limit=10)),
@@ -86,7 +113,30 @@ def test_all_charts_build_from_real_query_results(sample_conn):
     discovery = add_cumulative_artists(run_query(sample_conn, "discovery"))
     figures += [charts.new_artists_chart(discovery), charts.discovery_rate_chart(discovery),
                 charts.cumulative_artists_chart(discovery)]
+
+    sessions = run_query(sample_conn, "sessions")
+    top_artist = run_query(sample_conn, "artist_list").iloc[0]["artist_name"]
+    daily = run_query(sample_conn, "daily", start="2025-01-01", end="2025-12-31")
+    figures += [
+        charts.session_length_chart(session_length_buckets(sessions)),
+        charts.skip_fatigue_chart(run_query(sample_conn, "skip_fatigue")),
+        charts.artist_tracks_chart(run_query(sample_conn, "artist_tracks", artist=top_artist, limit=10)),
+        charts.calendar_chart(calendar_grid(daily, 2025)),
+    ]
     assert all(len(fig.data) >= 1 for fig in figures)
+
+
+def test_calendar_and_session_charts_show_a_message_on_empty_data(sample_conn):
+    empty_year = calendar_grid(run_query(sample_conn, "daily", start="1900-01-01", end="1900-12-31"), 1900)
+    assert charts.calendar_chart(empty_year).layout.annotations[0].text == "No data for this selection"
+    no_sessions = run_query(sample_conn, "sessions", start="1900-01-01", end="1900-12-31")
+    assert charts.session_length_chart(session_length_buckets(no_sessions)).layout.annotations
+
+
+def test_the_fake_data_shows_skip_fatigue_but_not_on_the_first_track(sample_conn):
+    fatigue = run_query(sample_conn, "skip_fatigue")
+    all_sessions = fatigue[fatigue["scope"] == "All sessions"].set_index("position_bucket")["skip_rate_pct"]
+    assert all_sessions["1. 1"] < all_sessions["3. 4-6"] < all_sessions["6. 21-40"]
 
 
 def test_charts_show_a_friendly_message_instead_of_crashing_on_empty_data(sample_conn):

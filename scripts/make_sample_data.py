@@ -14,6 +14,8 @@ The fake listener is designed to show off every chart:
   * new artists appearing gradually               -> discovery chart
   * weekday commute + evening habits, late weekends -> heatmap
   * skip rate that creeps upward over time        -> skip charts
+  * skipping that grows as a session goes on      -> skip-fatigue chart (an invented pattern)
+  * 1-3 sessions a day, separated by long pauses  -> sessions tab
 Times are generated as UTC and the dashboard shows the sample in UTC.
 """
 
@@ -105,12 +107,15 @@ def generate_plays(rng, artists) -> list[dict]:
             skip_prob = min(0.9, skip_base * (1.35 if shuffle else 0.5))
 
             reason_start = "clickrow"
-            for _ in range(max(1, plays_today // session_count)):
+            for position in range(max(1, plays_today // session_count)):
                 artist = pick_artist(rng, artists, day_number)
                 track = rng.choices(artist["tracks"], [1 / (i + 1) ** 0.5 for i in range(len(artist["tracks"]))])[0]
                 full_ms = track["seconds"] * 1000
 
-                if rng.random() < skip_prob:
+                # Skip fatigue: the first song of a session is one the listener picked, so it is
+                # rarely skipped; after that, skipping creeps up the longer the session runs.
+                fatigue = 0.3 if position == 0 else min(1.7, 1 + 0.03 * position)
+                if rng.random() < min(0.92, skip_prob * fatigue):
                     # Most skips happen within a few seconds.
                     ms_played = int(rng.choices(
                         [rng.uniform(800, 4900), rng.uniform(5000, 10000),

@@ -10,8 +10,8 @@ An end-to-end data project: an automated pipeline that collects my Spotify liste
 
 - **Collects** my recently played tracks every hour with a scheduled GitHub Actions job and stores them in SQLite, with no duplicates.
 - **Imports** my Spotify *Extended Streaming History* export (about 288,000 plays over 9 years), cleans it, and merges it into the same database. Plays that overlap with the API data are enriched, not duplicated.
-- **Analyzes** the data with 12 hand-written SQL queries (window functions, CTEs, gaps-and-islands streaks) plus pandas for reshaping.
-- **Visualizes** it in a Streamlit dashboard: summary stats, top artists and tracks, a weekday-by-hour heatmap, weekly/monthly trends, listening streaks, new-artist discovery, and skip behavior. All of it can be filtered by date range.
+- **Analyzes** the data with 19 hand-written SQL queries (window functions, CTEs, gaps-and-islands streaks and sessions) plus pandas for reshaping.
+- **Visualizes** it in a Streamlit dashboard with seven tabs: top lists, an artist deep-dive page, weekly/monthly trends, habits (a weekday-by-hour heatmap, a calendar heatmap of every day in a year, and streaks), listening sessions with a skip-fatigue analysis, new-artist discovery, and skip behavior. Most views can be filtered by date range.
 
 ## Architecture
 
@@ -37,7 +37,7 @@ flowchart LR
 | Storage | SQLite (schema in plain SQL, with a migration for older databases) |
 | Analysis | SQL (CTEs, window functions), pandas |
 | Dashboard | Streamlit, Plotly |
-| Quality | pytest (43 tests), headless Streamlit app tests |
+| Quality | pytest (62 tests), headless Streamlit app tests |
 
 ## Data engineering decisions
 
@@ -47,6 +47,8 @@ The interesting work was in the details of the data, not just the charts:
 - **Enrich, don't duplicate.** The export knows how long I listened and whether I skipped, and the API doesn't. When both describe the same play, a SQL `UPDATE ... FROM` copies the export's fields onto the existing row.
 - **What counts as a play.** Only about a third of the rows in the export are 30 seconds or longer. Counts and rankings use Spotify's own 30-second rule, while skip analysis uses every row.
 - **What counts as a skip.** The export's `skipped` flag is `false` for every play from 2018 to 2021 and is only populated from 2022. A skip here means pressing Next (`reason_end = 'fwdbtn'`), which is recorded in all years.
+- **Sessions.** A session is a run of plays with no gap over 30 minutes. Every play is stamped with when it *ended*, so its start is `ended - ms_played`, and a window function (`LAG`) compares each play's start with the previous play's end. A running total of the "new session" flags numbers the sessions, and the date filter is applied *after* that, so a date range never cuts a session in half.
+- **Skip fatigue, with a control.** Skip rate by position within a session rises as sessions go on, but long sessions are the only ones that reach late positions, so the mix of sessions changes along the chart. The dashboard therefore also shows sessions of 20+ tracks on their own, where the same sessions appear in every position group. It is still a pattern, not a proven cause.
 - **Time zones.** Spotify stores UTC. Hours and days are converted to my time zone with daylight saving handled. Caching the UTC offset instead of converting every play individually cut a full analysis run from 65 s to 14 s.
 - **Development Mode limits.** The app only uses endpoints still available to Development Mode apps (recently played, top items, playlists). It does not use audio features, recommendations or popularity.
 
@@ -70,6 +72,7 @@ My own data, Nov 2017 to Oct 2026:
 |---|---|
 | ![Trends](docs/screenshots/02-trends.png) **Trends:** weekly and monthly minutes | ![Habits and streaks](docs/screenshots/03-habits-streaks.png) **Habits & streaks:** weekday × hour heatmap |
 | ![Discovery](docs/screenshots/04-discovery.png) **Discovery:** new artists over time | ![Skips](docs/screenshots/05-skips.png) **Skips:** how, when and where I skip |
+| ![Sessions](docs/screenshots/06-sessions.png) **Sessions:** session length and skip fatigue | ![Artist deep-dive](docs/screenshots/07-artist-deep-dive.png) **Artist deep-dive:** one artist's whole history |
 
 ## Privacy
 
@@ -136,4 +139,5 @@ tests/          pytest suite (database, importer, analysis, dashboard)
 
 - Spotify's API only returns the last 50 plays, so the hourly collector would miss plays if I listened to more than 50 tracks within one hour. The export fills in any gap.
 - Development Mode apps cannot use audio features or recommendations, so there is no mood or genre analysis.
-- Ideas: genre analysis through another data source, a calendar-style daily heatmap, and forecasting weekly listening time.
+- Ideas: genre analysis through another data source (the export has artist names but no Spotify artist IDs, so matching would be approximate), and forecasting weekly listening time.
+- Artists are matched by name. Collaborations are credited to the track's main artist only.

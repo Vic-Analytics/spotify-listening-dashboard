@@ -34,6 +34,7 @@ DEFAULT_PARAMS = {
     "end": "9999-12-31",
     "limit": 20,
     "min_plays": 100,
+    "artist": "",
 }
 
 

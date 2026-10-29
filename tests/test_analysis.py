@@ -3,6 +3,8 @@ Tests for the analysis queries, using a tiny hand-made database where we know
 the right answers in advance. Run all tests with:   python -m pytest
 """
 
+import numpy as np
+import pandas as pd
 import pytest
 
 from analysis.metrics import fill_missing_periods, heatmap_matrix, streak_summary
@@ -186,6 +188,169 @@ def test_most_skipped_artists_hides_artists_below_the_minimum():
     conn = analysed([play("2026-01-05T18:00:00Z", "Rare", ms=2000, reason_end="fwdbtn")])
     assert run_query(conn, "skips_by_artist", min_plays=5).empty
     assert len(run_query(conn, "skips_by_artist", min_plays=1)) == 1
+
+
+# ---------- sessions ----------
+# `play()` makes 4-minute listens stamped with when they END, so plays ending
+# 4 minutes apart follow each other with no gap at all.
+
+def test_sessions_split_on_gaps_longer_than_30_minutes():
+    conn = analysed([
+        play("2026-01-05T18:00:00Z", "A"), play("2026-01-05T18:04:00Z", "B"), play("2026-01-05T18:08:00Z", "C"),
+        play("2026-01-05T19:00:00Z", "D"),                      # starts 48 min after C ended -> new session
+    ])
+    sessions = run_query(conn, "sessions")
+    assert list(sessions["tracks"]) == [3, 1]
+    assert sessions.iloc[0]["minutes"] == 12.0                   # 17:56 start to 18:08 end
+
+
+def test_a_gap_of_exactly_30_minutes_does_not_split_a_session():
+    conn = analysed([play("2026-01-05T18:00:00Z", "A"), play("2026-01-05T18:34:00Z", "B")])   # B starts 18:30
+    assert list(run_query(conn, "sessions")["tracks"]) == [2]
+
+
+def test_session_date_range_uses_the_start_date_and_never_cuts_a_session():
+    # Chicago is UTC-6 in January: this session starts Jan 5 23:50 local and ends after midnight.
+    conn = analysed([play("2026-01-06T05:54:00Z", "A"), play("2026-01-06T05:58:00Z", "B"),
+                     play("2026-01-06T06:02:00Z", "C"),
+                     play("2026-01-10T18:00:00Z", "D")])
+    jan5 = run_query(conn, "sessions", start="2026-01-05", end="2026-01-05")
+    assert list(jan5["tracks"]) == [3]
+    assert run_query(conn, "sessions", start="2026-01-06", end="2026-01-06").empty
+
+
+def test_sessions_count_skipped_previews_but_report_real_plays_separately():
+    conn = analysed([play("2026-01-05T18:00:00Z", "A", ms=240000),
+                     play("2026-01-05T18:00:04Z", "B", ms=4000, reason_end="fwdbtn")])
+    session = run_query(conn, "sessions").iloc[0]
+    assert (session["tracks"], session["plays"], session["skips"]) == (2, 1, 1)
+
+
+def test_session_summary_and_length_buckets():
+    from analysis.metrics import session_length_buckets, session_summary
+    conn = analysed([play("2026-01-05T18:00:00Z", "A"), play("2026-01-05T18:04:00Z", "B"),   # 8 min
+                     play("2026-01-06T18:00:00Z", "C"), play("2026-01-06T18:04:00Z", "D"),
+                     play("2026-01-06T18:08:00Z", "E"), play("2026-01-06T18:12:00Z", "F"),   # 16 min
+                     play("2026-01-07T18:00:00Z", "G")])                                      # 4 min
+    sessions = run_query(conn, "sessions")
+    summary = session_summary(sessions)
+    assert summary["sessions"] == 3
+    assert summary["median_minutes"] == 8.0
+    assert summary["longest_minutes"] == 16.0
+    buckets = session_length_buckets(sessions).set_index("length")
+    assert list(buckets["sessions"]) == [2, 1, 0, 0, 0, 0]
+    assert buckets.loc["10-30m", "pct_of_sessions"] == 33.3
+    assert session_summary(sessions.iloc[0:0])["sessions"] == 0
+
+
+def test_skip_fatigue_groups_skip_rate_by_position_in_session():
+    reasons = ["trackdone", "trackdone", "fwdbtn", "fwdbtn", "fwdbtn"]
+    conn = analysed([play(f"2026-01-05T18:{4 * i:02d}:00Z", f"T{i}", reason_end=r) for i, r in enumerate(reasons)])
+    fatigue = run_query(conn, "skip_fatigue")
+    assert set(fatigue["scope"]) == {"All sessions"}              # nobody reached 20 tracks
+    rates = dict(zip(fatigue["position_bucket"], fatigue["skip_rate_pct"]))
+    assert rates == {"1. 1": 0.0, "2. 2-3": 50.0, "3. 4-6": 100.0}
+
+
+def test_skip_fatigue_has_a_same_sessions_comparison_for_long_sessions():
+    # One session of 22 tracks (all skipped) and one of 2 (none skipped).
+    long_session = [play(f"2026-01-05T{18 + i * 4 // 60:02d}:{i * 4 % 60:02d}:00Z", f"L{i}", reason_end="fwdbtn")
+                    for i in range(22)]
+    short_session = [play("2026-01-06T18:00:00Z", "S1"), play("2026-01-06T18:04:00Z", "S2")]
+    fatigue = run_query(analysed(long_session + short_session), "skip_fatigue")
+    long_only = fatigue[fatigue["scope"] == "Sessions of 20+ tracks"]
+    assert long_only["plays"].sum() == 22
+    assert set(long_only["skip_rate_pct"]) == {100.0}
+    first_slot = fatigue[(fatigue["scope"] == "All sessions") & (fatigue["position_bucket"] == "1. 1")]
+    assert first_slot.iloc[0]["plays"] == 2                      # both sessions have a first track
+
+
+# ---------- artist deep-dive ----------
+
+def artist_db():
+    return analysed([
+        play("2026-01-05T18:00:00Z", "Fav", uri="spotify:track:f1"),
+        play("2026-01-05T19:00:00Z", "Fav", uri="spotify:track:f1"),
+        play("2026-02-05T18:00:00Z", "Fav", uri="spotify:track:f2", ms=120000),
+        play("2026-02-05T19:00:00Z", "Fav", uri="spotify:track:f2", ms=3000, reason_end="fwdbtn"),
+        play("2026-02-05T20:00:00Z", "Fav", uri="spotify:track:f3", ms=3000, reason_end="fwdbtn"),   # never reached 30 s
+        play("2026-02-06T18:00:00Z", "Other", ms=240000),
+    ])
+
+
+def test_artist_list_ranks_artists_by_minutes():
+    artists = run_query(artist_db(), "artist_list")
+    assert list(artists["artist_name"]) == ["Fav", "Other"]
+    assert list(artists["minutes"]) == [10.0, 4.0]
+
+
+def test_artist_profile_reports_the_facts_for_one_artist():
+    row = run_query(artist_db(), "artist_profile", artist="Fav").iloc[0]
+    assert (row["first_heard"], row["last_heard"]) == ("2026-01-05", "2026-02-05")
+    assert (row["plays"], row["starts"], row["tracks"], row["active_days"]) == (3, 5, 2, 2)
+    assert row["minutes"] == 10.0                                # 4 + 4 + 2
+    assert row["minutes_rank"] == 1
+    assert row["share_pct"] == round(100 * 10 / 14, 2)
+    assert row["skip_rate_pct"] == 40.0                          # 2 of 5 starts ended with Next
+    assert row["period_skip_pct"] == 40.0                        # all 5 of Fav's plays + nothing else in that span
+
+
+def test_artist_profile_for_an_unknown_artist_has_zero_plays():
+    row = run_query(artist_db(), "artist_profile", artist="Nobody").iloc[0]
+    assert row["plays"] == 0 and row["starts"] == 0
+
+
+def test_artist_tracks_rank_by_plays_and_leave_out_never_played_tracks():
+    tracks = run_query(artist_db(), "artist_tracks", artist="Fav")
+    assert list(tracks["plays"]) == [2, 1]                       # f1 then f2; f3 never reached 30 s
+    assert tracks.iloc[1]["starts"] == 2
+    assert tracks.iloc[1]["skip_rate_pct"] == 50.0
+    assert len(run_query(artist_db(), "artist_tracks", artist="Fav", limit=1)) == 1
+
+
+def test_artist_monthly_has_one_row_per_active_month():
+    monthly = run_query(artist_db(), "artist_monthly", artist="Fav")
+    assert list(monthly["month_start"]) == ["2026-01-01", "2026-02-01"]
+    assert list(monthly["minutes"]) == [8.0, 2.0]
+
+
+# ---------- calendar heatmap ----------
+
+def test_daily_query_and_calendar_grid_lay_a_year_out_by_week():
+    from analysis.metrics import calendar_grid
+    # 2026-01-01 is a Thursday, so the first column starts on Monday Dec 29 (outside the year).
+    conn = analysed([play("2026-01-01T18:00:00Z"), play("2026-01-01T19:00:00Z", "B"), play("2026-01-12T18:00:00Z")])
+    daily = run_query(conn, "daily", start="2026-01-01", end="2026-12-31")
+    assert list(daily["local_date"]) == ["2026-01-01", "2026-01-12"]
+    assert list(daily["minutes"]) == [8.0, 4.0]
+
+    grid = calendar_grid(daily, 2026)
+    assert grid["minutes"].shape == (7, 53)
+    assert grid["dates"][3, 0] == "2026-01-01"                   # Thursday, first column
+    assert grid["minutes"][3, 0] == 8.0
+    assert np.isnan(grid["minutes"][0, 0])                       # Mon Dec 29 belongs to last year
+    assert grid["dates"][0, 2] == "2026-01-12" and grid["minutes"][0, 2] == 4.0
+    assert grid["minutes"][1, 1] == 0.0                          # a quiet day inside the year is 0, not blank
+    assert grid["active_days"] == 2 and grid["days_covered"] == 365
+    assert grid["month_ticks"][0] == (0, "Jan") and len(grid["month_ticks"]) == 12
+
+
+def test_calendar_grid_leaves_days_outside_your_data_blank():
+    from analysis.metrics import calendar_grid
+    conn = analysed([play("2026-03-10T18:00:00Z")])
+    daily = run_query(conn, "daily", start="2026-01-01", end="2026-12-31")
+    grid = calendar_grid(daily, 2026, within=(pd.Timestamp("2026-03-01"), pd.Timestamp("2026-03-31")))
+    assert grid["days_covered"] == 31
+    assert np.isnan(grid["minutes"]).sum() == grid["minutes"].size - 31       # everything but March is blank
+    assert grid["dates"][0, 0] == ""                                           # the very first square: not in range
+    # Without `within`, a quiet day is a real 0.
+    assert calendar_grid(daily, 2026)["minutes"][3, 0] == 0.0
+
+
+def test_calendar_grid_handles_an_empty_year():
+    from analysis.metrics import calendar_grid
+    grid = calendar_grid(run_query(analysed([play("2026-01-05T18:00:00Z")]), "daily", start="2030-01-01", end="2030-12-31"), 2030)
+    assert grid["active_days"] == 0
 
 
 def test_unknown_query_name_fails_loudly():

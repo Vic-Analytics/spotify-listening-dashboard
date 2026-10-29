@@ -13,6 +13,7 @@ Design rules used throughout (so the charts read as one system):
   * Thin marks, hairline solid gridlines, quiet text, values in the hover tooltip.
 """
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
@@ -249,3 +250,101 @@ def skips_by_context_chart(df: pd.DataFrame, min_plays: int = 200) -> go.Figure:
     fig.update_yaxes(title="% of plays skipped", title_font=dict(color=INK_MUTED, size=12), range=[0, 100])
     fig.update_xaxes(showgrid=False)
     return _style(fig, legend=True)
+
+
+# ---- sessions -----------------------------------------------------------------------------
+
+def session_length_chart(df: pd.DataFrame) -> go.Figure:
+    """How long listening sessions last: share of sessions in each length bucket."""
+    if df["sessions"].sum() == 0:
+        return _empty()
+    fig = go.Figure(go.Bar(
+        x=df["length"], y=df["pct_of_sessions"], marker_color=BLUE,
+        customdata=df["sessions"],
+        text=[f"{p:.0f}%" for p in df["pct_of_sessions"]], textposition="outside", cliponaxis=False,
+        textfont=dict(color=INK_SECONDARY),
+        hovertemplate="%{x}<br>%{y:.1f}% of sessions (%{customdata:,} sessions)<extra></extra>",
+    ))
+    fig.update_yaxes(title="% of sessions", title_font=dict(color=INK_MUTED, size=12),
+                     range=[0, df["pct_of_sessions"].max() * 1.2])
+    fig.update_xaxes(showgrid=False)
+    return _style(fig)
+
+
+def skip_fatigue_chart(df: pd.DataFrame, min_plays: int = 100) -> go.Figure:
+    """Skip rate by position in the session. Two series (so a legend is shown): all
+    sessions in the skip colour, and the 20+ track sessions in quiet grey."""
+    df = df[df["plays"] >= min_plays]
+    if df.empty:
+        return _empty()
+    # Drop the '1. ' sort prefix; keep the buckets in their original order.
+    df = df.assign(label=[s.split(". ", 1)[1] for s in df["position_bucket"]])
+    labels = list(dict.fromkeys(df.sort_values("position_bucket")["label"]))
+    fig = go.Figure()
+    for scope, color in (("All sessions", ORANGE), ("Sessions of 20+ tracks", GRAY)):
+        part = df[df["scope"] == scope].set_index("label").reindex(labels)
+        fig.add_trace(go.Bar(
+            name=scope, x=labels, y=part["skip_rate_pct"], marker_color=color,
+            customdata=part["plays"].fillna(0),
+            hovertemplate="Track %{x}, " + scope.lower() +
+                          "<br>%{y:.1f}% skipped (%{customdata:,.0f} plays)<extra></extra>",
+        ))
+    fig.update_layout(barmode="group", bargap=0.3, bargroupgap=0.08,
+                      legend=dict(orientation="h", y=1.1, x=0, font=dict(color=INK_SECONDARY)))
+    fig.update_yaxes(title="% of plays skipped", title_font=dict(color=INK_MUTED, size=12), range=[0, 100])
+    fig.update_xaxes(title="Track number within the session", title_font=dict(color=INK_MUTED, size=12),
+                     showgrid=False)
+    return _style(fig, legend=True)
+
+
+# ---- artist deep-dive ------------------------------------------------------------------------------
+
+def artist_tracks_chart(df: pd.DataFrame) -> go.Figure:
+    return ranked_bars(df["track_name"], df["plays"], df["track_name"], "plays")
+
+
+# ---- calendar heatmap ----------------------------------------------------------------------------------
+
+NO_LISTENING = "#ecebe5"   # a quiet day: a neutral grey, clearly different from any blue in the ramp
+
+
+def calendar_chart(grid: dict) -> go.Figure:
+    """One year as a wall calendar (weeks across, Mon..Sun down). Darker blue = more
+    listening. Quiet days are grey, and squares outside the year are left blank."""
+    if grid["active_days"] == 0:
+        return _empty()
+    minutes, plays, dates = grid["minutes"], grid["plays"], grid["dates"]
+    weeks = list(range(minutes.shape[1]))
+    weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    def pretty(iso: str) -> str:
+        day = pd.Timestamp(iso)
+        return f"{day:%a, %b} {day.day}, {day.year}"
+
+    quiet_hover = [[f"{pretty(d)}<br>No listening" if d else "" for d in row] for row in dates]
+    played_hover = [[f"{pretty(d)}<br>{m:,.0f} min · {p:,.0f} plays" if d and m > 0 else ""
+                     for d, m, p in zip(d_row, m_row, p_row)]
+                    for d_row, m_row, p_row in zip(dates, minutes, plays)]
+    listened = np.where(minutes > 0, minutes, np.nan)
+    # Cap the colour scale at a typical big day, so a few marathon days don't wash out everything else.
+    top = float(np.nanpercentile(listened, 95))
+
+    fig = go.Figure()
+    fig.add_trace(go.Heatmap(                       # underlay: every day of the year, in grey
+        z=np.where(np.isnan(minutes), np.nan, 0.0), x=weeks, y=weekdays,
+        colorscale=[[0, NO_LISTENING], [1, NO_LISTENING]], showscale=False, xgap=2, ygap=2,
+        text=quiet_hover, hovertemplate="%{text}<extra></extra>",
+    ))
+    fig.add_trace(go.Heatmap(                       # on top: days with listening, blue
+        z=listened, x=weeks, y=weekdays, zmin=0, zmax=top,
+        colorscale=HEATMAP_SCALE, xgap=2, ygap=2,
+        text=played_hover, hovertemplate="%{text}<extra></extra>",
+        colorbar=dict(title=dict(text="Minutes", font=dict(size=12)), thickness=10, len=0.9,
+                      outlinewidth=0, tickfont=dict(color=INK_MUTED)),
+    ))
+    ticks = grid["month_ticks"]
+    _style(fig, height=250)        # first, because it switches the gridlines on
+    fig.update_yaxes(autorange="reversed", showgrid=False, linecolor="rgba(0,0,0,0)")
+    fig.update_xaxes(showgrid=False, linecolor="rgba(0,0,0,0)", tickmode="array",
+                     tickvals=[week for week, _ in ticks], ticktext=[name for _, name in ticks])
+    return fig
